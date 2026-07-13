@@ -54,10 +54,3 @@ jobs:
         with:
           name: chiptune-renders-webpage
           path: public_artifact/
-          
-      - name: Preview HTML
-        uses: pavi2410/html-preview-action@v2
-        with:
-         html_file: './public_artifact/index.html' # Main file
-         site_root: './public_artifact' # Assets folder
-    
