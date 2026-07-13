@@ -51,10 +51,14 @@ jobs:
 
       - name: Upload Artifacts
         uses: mmkal/artifact.ci/upload@main
+        id: upload # Задаем ID, чтобы потом прочитать outputs
         if: always()
         with:
           name: e2e-test-report
           path: public_artifact/
           artifactci-visibility: public
           artifactci-mode: eager
-        run: echo 'Report: ${{ steps.report.outputs.artifactci_run_url }}' >> $GITHUB_OUTPUT
+
+      - name: Print Report URL
+        if: always()
+        run: echo 'Report: ${{ steps.upload.outputs.artifactci_run_url }}' >> $GITHUB_OUTPUT
