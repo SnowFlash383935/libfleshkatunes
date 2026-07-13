@@ -3,7 +3,7 @@ CFLAGS = -O2 -Iinclude -Wall
 LDFLAGS = -lgme
 
 TARGET = test_runner
-SRC = src/chiptune_gme.c src/gme_helper.c tests/test_runner.c
+SRC = src/chiptune.c src/chiptune_gme.c src/gme_helper.c tests/test_runner.c
 
 all: $(TARGET)
 
