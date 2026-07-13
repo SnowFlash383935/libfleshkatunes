@@ -1,17 +1,12 @@
 #define _ISOC99_SOURCE
 #include "gme_helper.h"
-#include <gme/gme.h>
+#include "chiptune.h"
 #include <stdlib.h>
-#include <unistd.h>
+#include <stdio.h>
+#include <stdint.h>
 #include <string.h>
 
-static void handle_error_internal(const char* str) {
-    if (str) {
-        fprintf(stderr, "GME Error: %s\n", str);
-        exit(EXIT_FAILURE);
-    }
-}
-
+/* Вспомогательные функции для записи заголовка WAV в формате Little-Endian */
 static void write_le32(FILE *f, uint32_t val) {
     uint8_t buf[4] = {
         (uint8_t)(val & 0xFF),
@@ -30,43 +25,72 @@ static void write_le16(FILE *f, uint16_t val) {
     fwrite(buf, 1, 2, f);
 }
 
+/* * Универсальная функция рендеринга любого формата (включая SPC через GME-фасад).
+ * Больше не содержит специфичных для GME заголовочных вызовов в цикле записи.
+ */
 int render_gme_to_wav(const char *input_path, const char *output_wav_path, int duration_sec) {
-    long sample_rate = 44100;
-    int track = 0;
-    int chan_count = 2;
+    const long sample_rate = 44100;
+    const int track_index = 0;
+    const int chan_count = 2;
+    const size_t buf_size = 16384; /* Количество сэмплов за один проход рендеринга */
 
-    Music_Emu* emu = NULL;
-    handle_error_internal(gme_open_file(input_path, &emu, sample_rate));
-    gme_set_autoload_playback_limit(emu, 0);
-    gme_ignore_silence(emu, 1);
-
-    handle_error_internal(gme_start_track(emu, track));
-
-    FILE *file = fopen(output_wav_path, "wb");
-    if (!file) {
-        fprintf(stderr, "Error: Couldn't open WAVE file for writing: %s\n", output_wav_path);
-        gme_delete(emu);
+    /* Открываем файл через единый фасад библиотеки */
+    ChiptunePlayer* player = chiptune_open_file(input_path, sample_rate);
+    if (!player) {
+        fprintf(stderr, "Chiptune Error: Failed to open or recognize file: %s\n", input_path);
         return -1;
     }
 
+    /* Настраиваем параметры воспроизведения через абстрактный интерфейс */
+    if (chiptune_start_track(player, track_index) != 0) {
+        fprintf(stderr, "Chiptune Error: Failed to start track %d\n", track_index);
+        chiptune_close(player);
+        return -1;
+    }
+
+    chiptune_set_looping(player, 0); /* Отключаем автозацикливание для детерминированного рендеринга */
+
+    /* Открываем целевой WAV-файл для записи PCM-потока */
+    FILE *file = fopen(output_wav_path, "wb");
+    if (!file) {
+        fprintf(stderr, "Error: Couldn't open WAVE file for writing: %s\n", output_wav_path);
+        chiptune_close(player);
+        return -1;
+    }
+
+    /* Резервируем пространство под 44-байтный заголовок RIFF WAVE */
     uint8_t placeholder[44] = {0};
     fwrite(placeholder, 1, 44, file);
 
     long total_samples = 0;
     long max_time_ms = (long)duration_sec * 1000L;
-
-    while (gme_tell(emu) < max_time_ms) {
-        #define buf_size 16384
-        short buf[buf_size];
-
-        handle_error_internal(gme_play(emu, buf_size, buf));
-
-        for (int i = 0; i < buf_size; i++) {
-            write_le16(file, (uint16_t)buf[i]);
-        }
-        total_samples += buf_size;
+    short* buf = (short*)malloc(buf_size * sizeof(short));
+    
+    if (!buf) {
+        fprintf(stderr, "Error: Memory allocation failed for audio buffer\n");
+        fclose(file);
+        chiptune_close(player);
+        return -1;
     }
 
+    /* Основной конвейер рендеринга с использованием полиморфного метода */
+    while (chiptune_tell(player) < max_time_ms) {
+        int rendered = chiptune_play(player, buf, (int)buf_size);
+        if (rendered < 0) {
+            fprintf(stderr, "Chiptune Error: Render failure during playback loop\n");
+            break;
+        }
+
+        /* Запись сэмплов в порядке байтов Little-Endian */
+        for (int i = 0; i < rendered; i++) {
+            write_le16(file, (uint16_t)buf[i]);
+        }
+        total_samples += rendered;
+    }
+
+    free(buf);
+
+    /* Формирование и дописывание актуального заголовка WAV в начало файла */
     fseek(file, 0, SEEK_SET);
 
     uint32_t data_size = total_samples * sizeof(short);
@@ -78,17 +102,17 @@ int render_gme_to_wav(const char *input_path, const char *output_wav_path, int d
     write_le32(file, file_size);
     fwrite("WAVE", 1, 4, file);
     fwrite("fmt ", 1, 4, file);
-    write_le32(file, 16);
-    write_le16(file, 1);
+    write_le32(file, 16);          /* Размер структуры PCM */
+    write_le16(file, 1);           /* Аудиоформат (1 = PCM) */
     write_le16(file, chan_count);
     write_le32(file, sample_rate);
     write_le32(file, byte_rate);
     write_le16(file, block_align);
-    write_le16(file, 16);
+    write_le16(file, 16);          /* Битность (16 бит) */
     fwrite("data", 1, 4, file);
     write_le32(file, data_size);
 
     fclose(file);
-    gme_delete(emu);
+    chiptune_close(player); /* Безопасное полиморфное освобождение ресурсов бэкенда */
     return 0;
 }
