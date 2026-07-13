@@ -58,7 +58,3 @@ jobs:
           path: public_artifact/
           artifactci-visibility: public
           artifactci-mode: eager
-
-      - name: Print Report URL
-        if: always()
-        run: echo "Report URL is ${{ steps.upload.outputs.artifactci_run_url }}"
