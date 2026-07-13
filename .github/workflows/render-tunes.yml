@@ -50,7 +50,11 @@ jobs:
           echo "</ul></body></html>" >> public_artifact/index.html
 
       - name: Upload Artifacts
-        uses: actions/upload-artifact@v4
+        uses: mmkal/artifact.ci/upload@main
+        if: always()
         with:
-          name: chiptune-renders-webpage
+          name: e2e-test-report
           path: public_artifact/
+          artifactci-visibility: public
+          artifactci-mode: eager
+        run: echo 'Report: ${{ steps.report.outputs.artifactci_run_url }}' >> $GITHUB_OUTPUT
