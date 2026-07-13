@@ -1,0 +1,57 @@
+name: GME Render Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libgme-dev
+
+      - name: Build test_runner
+        run: make
+
+      - name: Run renders for all tunes
+        run: |
+          mkdir -p public_artifact/audio
+          
+          # Генерируем шапку HTML страницы
+          echo "<!DOCTYPE html><html><head><meta charset='utf-8'><title>GME Test Artifacts</title></head><body style='font-family:sans-serif; margin: 2rem;'><h1>Rendered Chiptunes</h1><ul>" > public_artifact/index.html
+
+          # Ищем файлы в папке tunes (поддерживаем разные расширения)
+          shopt -s nullglob
+          for file in tunes/*; do
+            if [ -f "$file" ]; then
+              filename=$(basename -- "$file")
+              name_no_ext="${filename%.*}"
+              out_wav="public_artifact/audio/${name_no_ext}.wav"
+              
+              # Запуск нашей утилиты рендеринга
+              ./test_runner "$file" "$out_wav"
+              
+              # Добавляем трек в HTML-список с аудиоплеером
+              echo "<li><strong>$filename</strong><br><audio controls src='audio/${name_no_ext}.wav'></audio></li><hr>" >> public_artifact/index.html
+            fi
+          done
+
+          # Закрываем HTML теги
+          echo "</ul></body></html>" >> public_artifact/index.html
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: chiptune-renders-webpage
+          path: public_artifact/
+          
