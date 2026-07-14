@@ -48,7 +48,7 @@ int render_gme_to_wav(const char *input_path, const char *output_wav_path, int d
         return -1;
     }
 
-    chiptune_set_looping(player, 0); /* Отключаем автозацикливание для детерминированного рендеринга */
+    chiptune_set_looping(player, 1); /* Отключаем автозацикливание для детерминированного рендеринга */
 
     /* Открываем целевой WAV-файл для записи PCM-потока */
     FILE *file = fopen(output_wav_path, "wb");
