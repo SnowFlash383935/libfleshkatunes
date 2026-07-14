@@ -7,16 +7,18 @@ ChiptunePlayer* chiptune_gme_open_file(const char* filepath, long sample_rate);
 
 ChiptunePlayer* chiptune_open_file(const char* filepath, long sample_rate) {
     if (!filepath) return NULL;
-    
+    char *dot = strrchr(filepath, '.');
+    char *extension = dot + 1;
     /* Диспетчер форматов: для любых файлов пока используем GME */
     /* В будущем здесь будет проверка расширения (.sid -> sid_open, и т.д.) */
     switch (extension){
         case "spc":
         case "nsf":
             return chiptune_gme_open_file(filepath, sample_rate);
-            break
+            break;
         default:
             return chiptune_gme_open_file(filepath, sample_rate);
+            break;
     }
 }
 
