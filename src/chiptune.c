@@ -10,7 +10,14 @@ ChiptunePlayer* chiptune_open_file(const char* filepath, long sample_rate) {
     
     /* Диспетчер форматов: для любых файлов пока используем GME */
     /* В будущем здесь будет проверка расширения (.sid -> sid_open, и т.д.) */
-    return chiptune_gme_open_file(filepath, sample_rate);
+    switch (extension){
+        case "spc":
+        case "nsf":
+            return chiptune_gme_open_file(filepath, sample_rate);
+            break
+        default:
+            return chiptune_gme_open_file(filepath, sample_rate);
+    }
 }
 
 int chiptune_start_track(ChiptunePlayer* player, int track_index) {
