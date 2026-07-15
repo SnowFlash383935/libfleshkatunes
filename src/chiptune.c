@@ -2,9 +2,10 @@
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
+#include <stdio.h>
 
-/* Объявление фабричной функции GME-бэкенда */
-ChiptunePlayer* chiptune_gme_open_file(const char* filepath, long sample_rate);
+/* Объявление фабричной функции GME-бэкенда для работы с памятью */
+ChiptunePlayer* chiptune_gme_open_data(const void* data, size_t size, long sample_rate);
 
 /* Кроссплатформенный аналог регистронезависимого сравнения (если под Windows, используется _stricmp) */
 #if defined(_MSC_VER)
@@ -14,40 +15,44 @@ ChiptunePlayer* chiptune_gme_open_file(const char* filepath, long sample_rate);
 ChiptunePlayer* chiptune_open_file(const char* filepath, long sample_rate) {
     if (!filepath) return NULL;
 
-    /* Ищем последнее вхождение точки в путь к файлу */
-    const char *dot = strrchr(filepath, '.');
-    
-    /* Защита от отсутствия расширения или если точка стоит в самом начале (например, скрытый файл) */
-    if (!dot || dot == filepath || *(dot + 1) == '\0') {
-        /* Возвращаем поведение по умолчанию (дефолтный бэкенд) */
-        return chiptune_gme_open_file(filepath, sample_rate);
+    /* Читаем файл целиком в оперативную память */
+    FILE *f = fopen(filepath, "rb");
+    if (!f) return NULL;
+
+    if (fseek(f, 0, SEEK_END) != 0) {
+        fclose(f);
+        return NULL;
+    }
+    long size = ftell(f);
+    if (size < 0) {
+        fclose(f);
+        return NULL;
+    }
+    if (fseek(f, 0, SEEK_SET) != 0) {
+        fclose(f);
+        return NULL;
     }
 
-    const char *extension = dot + 1;
-
-    /* Диспетчеризация форматов на базе GME */
-    if (strcasecmp(extension, "spc") == 0 ||
-        strcasecmp(extension, "nsf") == 0 ||
-        strcasecmp(extension, "vgm") == 0 ||
-        strcasecmp(extension, "gym") == 0 ||
-        strcasecmp(extension, "hes") == 0 ||
-        strcasecmp(extension, "kss") == 0 ||
-        strcasecmp(extension, "nsfe") == 0 ||
-        strcasecmp(extension, "sap") == 0 ||
-        strcasecmp(extension, "spc") == 0) {
-        return chiptune_gme_open_file(filepath, sample_rate);
+    void *buffer = malloc(size);
+    if (!buffer) {
+        fclose(f);
+        return NULL;
     }
 
-    /* Подготовка к будущим расширениям семейства PSF (mini-usf, mini-gsf и т.д.) */
-    /*
-    if (strcasecmp(extension, "miniusf") == 0 || strcasecmp(extension, "minigsf") == 0) {
-        // Здесь в будущем будет вызов utilities.h: psf_get_lib_name()
-        // и последующая склейка путей перед передачей в профильный бэкенд
+    if (fread(buffer, 1, size, f) != (size_t)size) {
+        free(buffer);
+        fclose(f);
+        return NULL;
     }
-    */
+    fclose(f);
 
-    /* Фолбэк для всех прочих неподтвержденных расширений */
-    return chiptune_gme_open_file(filepath, sample_rate);
+    /* Передаем полученный буфер в бэкенд открытия из памяти */
+    ChiptunePlayer *player = chiptune_gme_open_data(buffer, size, sample_rate);
+
+    /* Буфер больше не нужен, бэкенд gme_open_data копирует всё необходимое во внутренние структуры */
+    free(buffer);
+
+    return player;
 }
 
 int chiptune_start_track(ChiptunePlayer* player, int track_index) {
