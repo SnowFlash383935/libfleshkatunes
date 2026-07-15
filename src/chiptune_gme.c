@@ -70,10 +70,10 @@ static void chiptune_gme_close(ChiptunePlayer* p) {
     free(p);
 }
 
-/* Функция фабрики для открытия файла через GME */
-ChiptunePlayer* chiptune_gme_open_file(const char* filepath, long sample_rate) {
+/* Функция фабрики для открытия данных через GME из памяти */
+ChiptunePlayer* chiptune_gme_open_data(const void* data, size_t size, long sample_rate) {
     Music_Emu* emu = NULL;
-    if (gme_open_file(filepath, &emu, sample_rate) != NULL) return NULL;
+    if (gme_open_data(data, size, &emu, sample_rate) != NULL) return NULL;
 
     ChiptunePlayer* p = (ChiptunePlayer*)malloc(sizeof(ChiptunePlayer));
     if (!p) {
