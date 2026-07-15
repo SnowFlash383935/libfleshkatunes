@@ -13,8 +13,55 @@ static uint32_t read_le32(const uint8_t *buf) {
            ((uint32_t)buf[3] << 24);
 }
 
-const char* psf_get_lib_name(const char* filename) {
-    if (!filename) return NULL;
+/* Вспомогательная функция для извлечения значения тега по ключу из метаданных */
+static char* extract_tag_value(const char *metadata, const char *key) {
+    char search_buf[64];
+    snprintf(search_buf, sizeof(search_buf), "\n%s=", key);
+    
+    const char *ptr = strstr(metadata, search_buf);
+    if (!ptr) {
+        // Проверяем, если ключ идет в самом начале текста (без переноса строки перед ним)
+        snprintf(search_buf, sizeof(search_buf), "%s=", key);
+        if (strncmp(metadata, search_buf, strlen(search_buf)) == 0) {
+            ptr = metadata;
+        } else {
+            return NULL;
+        }
+    } else {
+        ptr += 1; // Пропускаем символ '\n'
+    }
+
+    const char *val_ptr = strchr(ptr, '=');
+    if (!val_ptr) return NULL;
+    val_ptr++; // переходим к значению
+
+    // Находим конец строки
+    const char *end_ptr = strchr(val_ptr, '\n');
+    size_t len = 0;
+    if (end_ptr) {
+        if (end_ptr > val_ptr && *(end_ptr - 1) == '\r') {
+            len = (end_ptr - 1) - val_ptr;
+        } else {
+            len = end_ptr - val_ptr;
+        }
+    } else {
+        len = strlen(val_ptr);
+    }
+
+    char *val = malloc(len + 1);
+    if (!val) return NULL;
+    memcpy(val, val_ptr, len);
+    val[len] = '\0';
+    return val;
+}
+
+/**
+ * Сканирует файл и возвращает массив имен библиотек (_lib1, _lib2... или _lib).
+ * Количество найденных элементов записывается в out_count.
+ */
+char** psf_get_lib_names(const char* filename, int *out_count) {
+    if (!filename || !out_count) return NULL;
+    *out_count = 0;
 
     FILE *f = fopen(filename, "rb");
     if (!f) return NULL;
@@ -34,8 +81,7 @@ const char* psf_get_lib_name(const char* filename) {
 
     // 2. Читаем размеры и CRC32 (по 4 байта)
     uint8_t buf4[4];
-    if (fread(buf4, 1, 4, f) != 4) { fclose(f); return NULL; }
-    // reserved_size игнорируем или сохраняем: uint32_t reserved_size = read_le32(buf4);
+    if (fread(buf4, 1, 4, f) != 4) { fclose(f); return NULL; } // reserved_size
 
     if (fread(buf4, 1, 4, f) != 4) { fclose(f); return NULL; }
     uint32_t exe_compressed_size = read_le32(buf4);
@@ -62,12 +108,11 @@ const char* psf_get_lib_name(const char* filename) {
     free(exe_compressed);
 
     if ((uint32_t)computed_crc != expected_crc) {
-        // Ошибка CRC — возвращаем NULL, как и заказывали
         fclose(f);
         return NULL;
     }
 
-    // 5. Читаем оставшуюся часть файла (метаданные)
+    // 5. Читаем метаданные до конца файла
     long current_pos = ftell(f);
     if (fseek(f, 0, SEEK_END) != 0) {
         fclose(f);
@@ -95,32 +140,61 @@ const char* psf_get_lib_name(const char* filename) {
     metadata[meta_size] = '\0';
     fclose(f);
 
-    // 6. Ищем тег "_lib=" внутри текста безопасным образом
-    const char *lib_key = "_lib=";
-    char *lib_ptr = strstr(metadata, lib_key);
-    char *lib_val = NULL;
+    // 6. Собираем зависимости: сначала ищем _lib1, _lib2, _lib3...
+    int max_libs = 4;
+    char **lib_names = malloc(max_libs * sizeof(char*));
+    if (!lib_names) {
+        free(metadata);
+        return NULL;
+    }
+    int count = 0;
 
-    if (lib_ptr) {
-        lib_ptr += strlen(lib_key);
-        // Находим конец строки с именем библиотеки
-        char *end_ptr = strchr(lib_ptr, '\n');
-        if (end_ptr) {
-            // Убираем возможный \r (CRLF)
-            if (end_ptr > lib_ptr && *(end_ptr - 1) == '\r') {
-                end_ptr--;
+    int n = 1;
+    while (1) {
+        char key_buf[32];
+        snprintf(key_buf, sizeof(key_buf), "_lib%d", n);
+        char *val = extract_tag_value(metadata, key_buf);
+        if (!val) break;
+
+        if (count >= max_libs) {
+            max_libs *= 2;
+            char **new_ptr = realloc(lib_names, max_libs * sizeof(char*));
+            if (!new_ptr) {
+                for (int i = 0; i < count; i++) free(lib_names[i]);
+                free(lib_names);
+                free(metadata);
+                return NULL;
             }
-            size_t len = end_ptr - lib_ptr;
-            lib_val = malloc(len + 1);
-            if (lib_val) {
-                memcpy(lib_val, lib_ptr, len);
-                lib_val[len] = '\0';
-            }
-        } else {
-            // Если перевода строки нет до конца файла
-            lib_val = strdup(lib_ptr);
+            lib_names = new_ptr;
+        }
+        lib_names[count++] = val;
+        n++;
+    }
+
+    // Если нумерованных тегов нет, проверяем классический одиночный тег _lib
+    if (count == 0) {
+        char *val = extract_tag_value(metadata, "_lib");
+        if (val) {
+            lib_names[count++] = val;
         }
     }
 
     free(metadata);
-    return lib_val; // Будет NULL, если тег не найден, либо строка с именем либы
+
+    if (count == 0) {
+        free(lib_names);
+        return NULL;
+    }
+
+    *out_count = count;
+    return lib_names;
+}
+
+/* Функция для освобождения памяти массива имен либ */
+void psf_free_lib_names(char **lib_names, int count) {
+    if (!lib_names) return;
+    for (int i = 0; i < count; i++) {
+        free(lib_names[i]);
+    }
+    free(lib_names);
 }
